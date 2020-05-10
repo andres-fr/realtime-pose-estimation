@@ -163,6 +163,7 @@ class ContextAwareModule(torch.nn.Module):
         # hybrid dilated conv branch (hdcs need to be concatenated)
         if hdc_chans is None:
             hdc_chans = in_chans // 4
+        hdc_top_chans = hdc_chans * len(hdc_dilations)
         self.hdcs = torch.nn.ModuleList([
             torch.nn.Sequential(
                 torch.nn.Conv2d(in_chans, hdc_chans, kernel_size=3,
@@ -172,7 +173,7 @@ class ContextAwareModule(torch.nn.Module):
                 torch.nn.ReLU(inplace=True))
             for d in hdc_dilations])
         self.hdc_top = torch.nn.Sequential(
-            torch.nn.Conv2d(in_chans, in_chans, kernel_size=1, bias=False),
+            torch.nn.Conv2d(hdc_top_chans, in_chans, kernel_size=1, bias=False),
             torch.nn.BatchNorm2d(in_chans, momentum=bn_momentum),
             torch.nn.ReLU(inplace=True))
         # final ReLU
@@ -559,7 +560,7 @@ class CamStudent(torch.nn.Module):
         cams = torch.nn.ModuleList()
         hms = torch.nn.ModuleList()
         for i in range(self.num_stages):
-            cams.append(ContextAwareModule(self.inplanes))
+            cams.append(ContextAwareModule(self.inplanes, hdc_dilations=[1, 2, 3, 5, 8, 12]))
             hms.append(torch.nn.Conv2d(self.inplanes, hm_out_ch,
                                        kernel_size=3, padding=1, bias=True))
         return cams, hms

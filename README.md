@@ -2,7 +2,7 @@
 
 The goal of this repository is to achieve real-time, multi-person, keypoint-based pose estimation, with competitive compromise between runtime/size and performance. Translation to monocular 3D estimation and lightweight applications is also explored.
 
-**Check the [LICENSE](LICENSE) for details on the usage conditions.
+Check the [LICENSE](LICENSE) for details on the usage conditions.
 
 
 ## Usage

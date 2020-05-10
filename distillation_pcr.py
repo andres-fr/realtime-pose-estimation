@@ -20,7 +20,7 @@ from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
 from rtpe.dataloaders import CocoDistillationDatasetAugmented
 from rtpe.students import CamStudent
 from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
-    DistillationLoss
+    DistillationLossKeypointMining
 from rtpe.engine import eval_student
 
 
@@ -62,15 +62,15 @@ SCALE_RANGE = [0.7, 1.3]
 
 # training
 TRAINABLE_STEM = False
-TRAIN_BATCH_SIZE = 30
-NUM_EPOCHS = 5000
+TRAIN_BATCH_SIZE = 10
+NUM_EPOCHS = 10000
 BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
 MINIVAL_GT_STDDEVS = [2.0]
 VAL_GT_STDDEVS = [2.0]
 TRAIN_GT_STDDEVS = [5.0]  # [20.0, 5.0]
 DISTILLATION_ALPHA = 0.5
-OPT_INIT_PARAMS = {"momentum": 0, "weight_decay": 0.000}
+OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.001}
 SCHEDULER_HYPERPARS = {"max_lr": 0.01,
                        "min_lr": 0.001,
                        "period": 500,
@@ -107,6 +107,7 @@ DUMMY_INPUT = torch.rand(1, 3, 200, 200).to(DEVICE)
 
 student = CamStudent(MODEL_PATH, DEVICE,
                      48, 3,  # inplanes, num_stages
+                     # 80, 3,  # inplanes, num_stages
                      NUM_HEATMAPS, 0,  #  AE_DIMENSIONS,
                      HALF_PRECISION,
                      PARAM_INIT_FN,
@@ -153,7 +154,7 @@ txt_logger.info("HYPERPARAMETERS:\n{}".format(HPARS_DICT))
 
 
 # INSTANTIATE OPTIMIZER
-loss_fn = DistillationLoss()
+loss_fn = DistillationLossKeypointMining()
 # If stem is not trainable it already has torch.no_grad so opt won't train it
 opt = get_sgd_optimizer(student.parameters(), half_precision=HALF_PRECISION,
                         **OPT_INIT_PARAMS)
@@ -249,7 +250,8 @@ for epoch in range(NUM_EPOCHS):
         #                   for pp, gg in zip(preds, gt)])
         batch_loss = loss_fn(preds[0][:, :17], teach_preds[:, :17],
                              gt[0][:, :17],
-                             alpha=DISTILLATION_ALPHA, mask=masks[:, :17])
+                             alpha=DISTILLATION_ALPHA, mask=masks[:, :17],
+                             background_factor=0.01)  ###
         #
         batch_loss.backward()
         opt.step()

@@ -160,3 +160,38 @@ class DistillationLoss(torch.nn.Module):
         gt_loss = self.gt_loss_fn(student_pred, gt, mask)
         result = alpha * teacher_loss + (1 - alpha) * gt_loss
         return result
+
+
+class DistillationLossKeypointMining(DistillationLoss):
+    """
+    Inspired in http://arxiv.org/abs/1711.07319, section 4.2.3. Pick_top=8
+    """
+    def forward(self, student_pred, teacher_pred, gt, alpha=0.5, mask=None,
+                background_factor=0, pick_top=None):
+        """
+        """
+
+        # TODO: if
+        # 2. make connected component analysis of all separate components
+        # 3. Compute the square error for each pixel
+        # 4.
+        assert 0 <= background_factor <= 1
+        if mask is not None:
+            with torch.no_grad():
+                bg_mask = gt.cpu() == 0
+                mask[bg_mask] *= background_factor
+        #
+        if pick_top is not None:
+            with torch.no_grad():
+                # make connected component analysis of all separate components
+                # compute square distill error for each pixel
+                # average error for each connected component and sort descending
+                # all entries below highest "PICK_TOP" entries
+                raise NotImplementedError
+        #
+        # import matplotlib
+        # from .helpers import plot_arrays
+        # matplotlib.use('TkAgg')
+        # plot_arrays(gt[0].max(dim=0)[0].cpu(), teacher_pred[0].max(dim=0)[0].cpu(), mask[0].max(dim=0)[0].cpu())
+        # breakpoint()
+        return super().forward(student_pred, teacher_pred, gt, alpha, mask)

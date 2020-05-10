@@ -77,11 +77,6 @@ hm_parser = HeatmapParser(num_joints=17,
                           nms_padding=2)
 
 
-# print("Due to PLT bug type in this line and press c:\n",
-#       "import matplotlib; matplotlib.use('TkAgg')")
-# breakpoint()
-
-
 # "TRAINING" SET
 for i in range(NUM_TRAIN_PLOTS):
     print("TRAIN >>>", i)
