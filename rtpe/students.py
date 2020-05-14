@@ -571,6 +571,7 @@ class CamStudent(torch.nn.Module):
         out_hms = []
         if self.trainable_stem:
             stem_out = self.stem(x)
+            stem_out = self.mid_stem(stem_out)
         else:
             with torch.no_grad():
                 stem_out = self.stem(x)

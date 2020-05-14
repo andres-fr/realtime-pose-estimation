@@ -2,6 +2,15 @@
 
 
 """
+TODO:
+
+we need a student that is ABLE to output heatmaps, so:
+
+1. Change the stem for a custom one
+2. Train on the student output resolution, i.e. scale down labels not opposite
+3. reduce background gradients even more?
+4. increase GT heatmap size
+
 """
 
 
@@ -27,7 +36,10 @@ from rtpe.engine import eval_student
 # #############################################################################
 # # GLOBALS
 # #############################################################################
-DEBUG_REDUCE_TRAINSET = True  # remove this once training succeeds
+# DEBUG_REDUCE_TRAINSET = True  # remove this once training succeeds
+EASY_VAL_BIG_PATH = "assets/coco_val_easy_big.txt"
+EASY_VAL_MED_PATH = "assets/coco_val_easy_med.txt"
+EASY_VAL_SMALL_PATH = "assets/coco_val_easy_small.txt"
 
 # general/pathing
 DEVICE = "cuda"
@@ -68,7 +80,7 @@ BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
 MINIVAL_GT_STDDEVS = [2.0]
 VAL_GT_STDDEVS = [2.0]
-TRAIN_GT_STDDEVS = [5.0]  # [20.0, 5.0]
+TRAIN_GT_STDDEVS = [20.0]  # [20.0, 5.0]
 DISTILLATION_ALPHA = 0.5
 OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.001}
 SCHEDULER_HYPERPARS = {"max_lr": 0.01,
@@ -105,13 +117,14 @@ tb_logger = SummaryWriter(log_dir=TB_LOGDIR)
 # INSTANTIATE MODEL
 DUMMY_INPUT = torch.rand(1, 3, 200, 200).to(DEVICE)
 
-student = CamStudent(MODEL_PATH, DEVICE,
+student = CamStudent(None,  # MODEL_PATH,
+                     DEVICE,
                      48, 3,  # inplanes, num_stages
                      # 80, 3,  # inplanes, num_stages
                      NUM_HEATMAPS, 0,  #  AE_DIMENSIONS,
                      HALF_PRECISION,
                      PARAM_INIT_FN,
-                     TRAINABLE_STEM,
+                     True,  # TRAINABLE_STEM,
                      BATCHNORM_MOMENTUM)
 
 hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,
@@ -165,6 +178,10 @@ lr_scheduler = SgdrScheduler(opt.optimizer, **SCHEDULER_HYPERPARS)
 with open(MINIVAL_FILE, "r") as f:
     MINIVAL_IDS = [int(line.rstrip('.jpg\n')) for line in f]
 
+with open(EASY_VAL_MED_PATH, "r") as f:
+    EASY_IDS = [int(line.rstrip('.jpg\n')) for line in f]
+
+
 IMG_NORMALIZE_TRANSFORM = torchvision.transforms.Compose([
     # jitter? to gray?
     torchvision.transforms.Normalize(mean=IMG_NORM_MEAN,
@@ -203,18 +220,25 @@ val_dl = torch.utils.data.DataLoader(
 
 
 train_ds = CocoDistillationDatasetAugmented(
-    COCO_DIR, "train2017",
-    HRNET_TRAIN_DIR,
+    COCO_DIR, "val2017",
+    HRNET_VAL_DIR,
     gt_stddevs_pix=TRAIN_GT_STDDEVS,
     img_transform=IMG_NORMALIZE_TRANSFORM,
     overall_transform=AUGMENTATION_TRANSFORM,
+    whitelist_ids=EASY_IDS,
     remove_images_without_annotations=True)
 
 
-
-# THIS IS TO TEST IF THE NN LEARNS AT ALL! REMOVE IT TO PROPERLY TRAIN
-if DEBUG_REDUCE_TRAINSET:
-    train_ds.ids = train_ds.ids[:50]
+# train_ds = CocoDistillationDatasetAugmented(
+#     COCO_DIR, "train2017",
+#     HRNET_TRAIN_DIR,
+#     gt_stddevs_pix=TRAIN_GT_STDDEVS,
+#     img_transform=IMG_NORMALIZE_TRANSFORM,
+#     overall_transform=AUGMENTATION_TRANSFORM,
+#     remove_images_without_annotations=True)
+# # THIS IS TO TEST IF THE NN LEARNS AT ALL! REMOVE IT TO PROPERLY TRAIN
+# if DEBUG_REDUCE_TRAINSET:
+#     train_ds.ids = train_ds.ids[:50]
 
 
 train_dl = torch.utils.data.DataLoader(
