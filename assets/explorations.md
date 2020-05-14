@@ -49,6 +49,12 @@ input_features[2:5] = rgb2lab(img).transpose(2, 0, 1)
 It seems that the HRNet_w32 with 7.1 GFLOPs and 0.75 COCO is a good candidate for distillation:
 https://github.com/leoxiaobin/deep-high-resolution-net.pytorch
 
+* We have tried several students, latest PCR with dilations up to 12. no meaningful output came out.
+* We added keypoint mining strategies. seem to have a good impact (more informative gradients?) but still no good outcome
+* Selected easy minitrain datasets with small/med/big people on them. Still no good outcome
+* Inspected pretrained stem outputs: they look very informative and meaningful.
+* Went back to pose distillation paper for arch specifics: student models are 100MB? The teacher is 130MB. And HRNet student is same arch definition? that could be a reason, investigate further?
+
 
 ### Software TODO:
 

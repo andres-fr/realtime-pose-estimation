@@ -22,7 +22,7 @@ from rtpe.dataloaders import CocoDistillationDatasetAugmented
 # #############################################################################
 # # GLOBALS
 # #############################################################################
-NUM_TRAIN_PLOTS = 2
+NUM_TRAIN_PLOTS = 5
 NUM_MINIVAL_PLOTS = 2
 MINIVAL_OUTPUT_DIR = "/tmp"
 
@@ -80,11 +80,11 @@ hm_parser = HeatmapParser(num_joints=17,
 # "TRAINING" SET
 for i in range(NUM_TRAIN_PLOTS):
     print("TRAIN >>>", i)
-    img_id, img, mask, hms, teach_hms, teach_ae = val_augm_dataset[i]
+    img_id, img, mask, hms, teach_hms, teach_ae, segmsk = val_augm_dataset[i]
     # plot: img, mask, ground truths, teacher detection
     matplotlib.use('TkAgg')
-    plot_arrays(img.permute(1, 2, 0), mask, *[hm.max(dim=0)[0] for hm in hms],
-                teach_hms.sum(dim=0))
+    plot_arrays(img.permute(1, 2, 0), mask, segmsk,
+                *[hm.max(dim=0)[0] for hm in hms], teach_hms.sum(dim=0))
 
 
 # MINIVAL DATASET
@@ -93,7 +93,7 @@ all_scores = []
 len_minival_dataset = len(minival_dataset)
 for i in range(len_minival_dataset):
     print("MINIVAL >>>", i)
-    img_id, img, mask, hms, teach_hms, teach_ae = minival_dataset[i]
+    img_id, img, mask, hms, teach_hms, teach_ae, segmsk = minival_dataset[i]
     grouped, scores = hm_parser.parse(
         teach_hms.unsqueeze(0), teach_ae.unsqueeze(0),
         adjust=True, refine=True)

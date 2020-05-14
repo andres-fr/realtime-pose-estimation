@@ -1,6 +1,6 @@
 # BACKGROUND:
 
-This section summarizes the main ideas captured from a brief review of the recent literature (check the [BibTex references](assets/references.bib). Surely a lot is left behind. There is agreement across the literature that for good human pose estimation both locally precise features as well as relatively broad contextual features are needed. While there is great variety in aproaches even within DL, all best performing models seem to address this directly in one way or another. The models are categorized in 2 practices:
+This section summarizes the main ideas captured from a brief review of the recent literature (check the [BibTex references](references.bib). Surely a lot is left behind. There is agreement across the literature that for good human pose estimation both locally precise features as well as relatively broad contextual features are needed. While there is great variety in aproaches even within DL, all best performing models seem to address this directly in one way or another. The models are categorized in 2 practices:
 
 * Top-Down: First, all person instances are detected. Then, for each person, the keypoints are found.
 * Bottom-up: First, find all the separate human keypoints (and optionally limbs) in an image. Then assemble them into people.

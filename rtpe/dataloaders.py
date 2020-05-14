@@ -166,9 +166,7 @@ class CocoDistillationDataset(CocoDataset):
     def get_mask(self, anno, idx):
         coco = self.coco
         img_info = coco.loadImgs(self.ids[idx])[0]
-
         m = np.zeros((img_info['height'], img_info['width']))
-
         for obj in anno:
             if obj['iscrowd']:
                 rle = pycocotools.mask.frPyObjects(
@@ -180,6 +178,26 @@ class CocoDistillationDataset(CocoDataset):
                 for rle in rles:
                     m += pycocotools.mask.decode(rle)
         return m < 0.5
+
+    def get_human_segmentation_mask(self, idx):
+        """
+        Get a boolean mask of same shape as image, where background is false
+        and 'person' segmentations are true.
+        """
+        coco = self.coco
+        person_cat_id = coco.getCatIds(catNms=["person"])[0]  # usually 1
+        #
+        img_info = coco.loadImgs(self.ids[idx])[0]
+        mask = np.zeros((img_info['height'], img_info['width']),
+                        dtype=np.bool)
+        #
+        ann_ids = coco.getAnnIds(imgIds=self.ids[idx], iscrowd=False)
+        anns = coco.loadAnns(ann_ids)
+        for a in anns:
+            if a["category_id"] == person_cat_id:
+                mask |= coco.annToMask(a).astype(np.bool)
+        #
+        return mask
 
     def get_joints(self, anno):
         num_people = len(anno)
@@ -227,13 +245,15 @@ class CocoDistillationDataset(CocoDataset):
         teacher_hms, teacher_ae = self._get_teacher_data(
             img_num, out_hw=mask.shape)
         #
+        segm_mask = self.get_human_segmentation_mask(idx)
         # CREATE TENSORS AS IT MAY BE FASTER
         img_id = torch.tensor(img_id, dtype=torch.int64)
         img = torchvision.transforms.functional.to_tensor(img)
         mask = torch.FloatTensor(mask)
         hms = [torch.FloatTensor(hm) for hm in hms]
+        segm_mask = torch.FloatTensor(segm_mask)
         #
-        return img_id, img, mask, hms, teacher_hms, teacher_ae
+        return img_id, img, mask, hms, teacher_hms, teacher_ae, segm_mask
 
 
 class CocoDistillationDatasetAugmented(CocoDistillationDataset):
@@ -267,7 +287,8 @@ class CocoDistillationDatasetAugmented(CocoDistillationDataset):
         """
         """
         # all returned vals are FloatTensors
-        img_id, img, mask, hms, teach_hms, teach_ae = super().__getitem__(idx)
+        (img_id, img, mask, hms, teach_hms, teach_ae,
+         segm_mask) = super().__getitem__(idx)
         #
         if self.img_transform is not None:
             img = self.img_transform(img)
@@ -283,5 +304,6 @@ class CocoDistillationDatasetAugmented(CocoDistillationDataset):
                                    for ch in teach_hms])
             teach_ae = torch.cat([self.overall_transform(seed, ch)
                                   for ch in teach_ae])
+            segm_mask = self.overall_transform(seed, segm_mask).squeeze()
         #
-        return img_id, img, mask, hms, teach_hms, teach_ae
+        return img_id, img, mask, hms, teach_hms, teach_ae, segm_mask
