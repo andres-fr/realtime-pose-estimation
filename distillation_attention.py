@@ -4,7 +4,6 @@
 """
 """
 
-
 import os
 import time
 #
@@ -18,7 +17,7 @@ from rtpe.third_party.group import HeatmapParser
 from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
     ModuleSummary
 from rtpe.dataloaders import CocoDistillationDatasetAugmented
-from rtpe.students import CamStudent
+from rtpe.students import AttentionStudent
 from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
     DistillationLossKeypointMining
 from rtpe.engine import eval_student
@@ -71,7 +70,7 @@ BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
 MINIVAL_GT_STDDEVS = [2.0]
 VAL_GT_STDDEVS = [2.0]
-TRAIN_GT_STDDEVS = [20.0]  # [20.0, 5.0]
+TRAIN_GT_STDDEVS = [5.0]  # [20.0, 5.0]
 DISTILLATION_ALPHA = 0.5
 OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.001}
 SCHEDULER_HYPERPARS = {"max_lr": 0.01,
@@ -106,17 +105,16 @@ txt_logger = ColorLogger(__file__, TXT_LOGPATH, filemode="w")  # w = write anew
 tb_logger = SummaryWriter(log_dir=TB_LOGDIR)
 
 # INSTANTIATE MODEL
-DUMMY_INPUT = torch.rand(1, 3, 200, 200).to(DEVICE)
+DUMMY_INPUT = torch.rand(1, 3, 456, 456).to(DEVICE)
 
-student = CamStudent(None,  # MODEL_PATH,
-                     DEVICE,
-                     48, 3,  # inplanes, num_stages
-                     # 80, 3,  # inplanes, num_stages
-                     NUM_HEATMAPS, 0,  #  AE_DIMENSIONS,
-                     HALF_PRECISION,
-                     PARAM_INIT_FN,
-                     True,  # TRAINABLE_STEM,
-                     BATCHNORM_MOMENTUM)
+student = AttentionStudent(MODEL_PATH,
+                           DEVICE,
+                           100, # inplanes,
+                           NUM_HEATMAPS, 0,  #  AE_DIMENSIONS,
+                           HALF_PRECISION,
+                           PARAM_INIT_FN,
+                           False,  # TRAINABLE_STEM,
+                           BATCHNORM_MOMENTUM)
 
 hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,
                           **HM_PARSER_PARAMS)
@@ -159,17 +157,31 @@ txt_logger.info("HYPERPARAMETERS:\n{}".format(HPARS_DICT))
 
 # INSTANTIATE OPTIMIZER
 loss_fn = DistillationLossKeypointMining()
+att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1)*10).to(DEVICE)
 # If stem is not trainable it already has torch.no_grad so opt won't train it
-opt = get_sgd_optimizer(student.parameters(), half_precision=HALF_PRECISION,
-                        **OPT_INIT_PARAMS)
-lr_scheduler = SgdrScheduler(opt.optimizer, **SCHEDULER_HYPERPARS)
+params = (# list(student.mid_stem.parameters()) +
+          list(student.att_lo.parameters()) +
+          list(student.att_mid.parameters()) +
+          list(student.att_hi.parameters()) +
+          list(student.att_top.parameters()))
+att_opt = get_sgd_optimizer(params, half_precision=HALF_PRECISION,
+                            **OPT_INIT_PARAMS)
+att_lr_scheduler = SgdrScheduler(att_opt.optimizer, **SCHEDULER_HYPERPARS)
+params = (list(student.mid_stem.parameters()) +
+          list(student.det_lo.parameters()) +
+          list(student.det_mid.parameters()) +
+          list(student.det_hi.parameters()) +
+          list(student.det_top.parameters()))
+det_opt = get_sgd_optimizer(params, half_precision=HALF_PRECISION,
+                            **OPT_INIT_PARAMS)
+det_lr_scheduler = SgdrScheduler(det_opt.optimizer, **SCHEDULER_HYPERPARS)
 
 
 # INSTANTIATE DATALOADERS
 with open(MINIVAL_FILE, "r") as f:
     MINIVAL_IDS = [int(line.rstrip('.jpg\n')) for line in f]
 
-with open(EASY_VAL_MED_PATH, "r") as f:
+with open(EASY_VAL_SMALL_PATH, "r") as f:
     EASY_IDS = [int(line.rstrip('.jpg\n')) for line in f]
 
 
@@ -244,43 +256,68 @@ train_dl = torch.utils.data.DataLoader(
 global_step = 1
 best_score = -1
 for epoch in range(NUM_EPOCHS):
-    for (img_id, imgs, masks, hms, teach_hms, teach_aes) in train_dl:
+    for (img_id, imgs, masks, hms, teach_hms, teach_aes, segmsks) in train_dl:
         txt_logger.info("TRAINING epoch: {}, global step: {}".format(
             epoch, global_step))
         student.train()
-        opt_lr = opt.optimizer.param_groups[0]["lr"]
-        opt.zero_grad()
+        att_opt_lr = att_opt.optimizer.param_groups[0]["lr"]
+        att_opt.zero_grad()
+        det_opt_lr = det_opt.optimizer.param_groups[0]["lr"]
+        det_opt.zero_grad()
         #
         imgs = imgs.to(DEVICE)
-        gt = [torch.cat([gg, teach_aes[:, 0:1, :, :]], dim=1).to(DEVICE)
-              for gg in hms]
-        masks = masks.unsqueeze(1).expand(*gt[0].shape).to(DEVICE)
-        teach_preds = torch.cat([teach_hms, teach_aes[:, 0:1, :, :]],
-                                dim=1).to(DEVICE)
-        # this particular model has the option of intermediate learning,
-        # so the loss needs to be adapted in that case
-        preds = student(imgs, out_hw=TRAIN_HW)
-        # batch_loss = sum([loss_fn(pp, teach_preds, gg,
-        #                           alpha=DISTILLATION_ALPHA, mask=masks)
-        #                   for pp, gg in zip(preds, gt)])
-        batch_loss = loss_fn(preds[0][:, :17], teach_preds[:, :17],
-                             gt[0][:, :17],
-                             alpha=DISTILLATION_ALPHA, mask=masks[:, :17],
-                             background_factor=0.01)  ###
+        # gt = [torch.cat([gg, teach_aes[:, 0:1, :, :]], dim=1).to(DEVICE)
+        #       for gg in hms]
+        # masks = masks.unsqueeze(1).expand(*gt[0].shape).to(DEVICE)
+
+        # masks = masks.unsqueeze(1).expand(*gt[0].shape).to(DEVICE)
+        # teach_preds = torch.cat([teach_hms, teach_aes[:, 0:1, :, :]],
+        #                         dim=1).to(DEVICE)
+
+        att, det = student(imgs, out_hw=TRAIN_HW)
+
+        with torch.no_grad():
+            segmsks = torch.nn.functional.interpolate(
+                segmsks.unsqueeze(1), att.shape[-2:], mode="bilinear").to(DEVICE)
+            gt_hms = torch.nn.functional.interpolate(
+                hms[0], det.shape[-2:], mode="bilinear").to(DEVICE)
+            teacher_hms = torch.nn.functional.interpolate(
+                teach_hms, det.shape[-2:], mode="bilinear").to(DEVICE)
+            masks = torch.nn.functional.interpolate(
+                masks.unsqueeze(1), det.shape[-2:],
+                mode="bilinear").expand(gt_hms.shape).to(DEVICE)
+        # train segmentation
+        segmentation_loss = att_loss_fn(att, segmsks)
+        segmentation_loss.backward(retain_graph=True)
+        att_opt.step()
+        att_lr_scheduler.step()
+        # train keypoints
+        detection_loss = loss_fn(det, teacher_hms, gt_hms,
+                                 alpha=DISTILLATION_ALPHA, mask=masks,
+                                 background_factor=0.1)
+        detection_loss.backward()
+        det_opt.step()
+        det_lr_scheduler.step()
         #
-        batch_loss.backward()
-        opt.step()
-        lr_scheduler.step()
-        #
-        tb_logger.add_scalar("batch_loss", batch_loss, global_step)
-        tb_logger.add_scalar("lrate", opt_lr, global_step)
-        txt_logger.info("   batch_loss: {}, lrate: {}".format(batch_loss,
-                                                              opt_lr))
+        tb_logger.add_scalar("attention loss", segmentation_loss, global_step)
+        tb_logger.add_scalar("keypoints loss", detection_loss, global_step)
+        tb_logger.add_scalar("attention lrate", att_opt_lr, global_step)
+        tb_logger.add_scalar("keypoints lrate", det_opt_lr, global_step)
+        txt_logger.info("   attention_batch_loss: {}, lrate: {}".format(
+            segmentation_loss, att_opt_lr))
+        txt_logger.info("   keypoints_batch_loss: {}, lrate: {}".format(
+            detection_loss, det_opt_lr))
         if global_step % TB_DIAGNOSE_EVERY_BATCHES == 0:
             # add image to TB
             norm_img = imgs[0] - imgs[0].min()
             norm_img /= norm_img.max()
             tb_logger.add_image("batch imgs", norm_img,
+                                global_step=global_step)
+            # add masks
+            tb_logger.add_image("gradient masks",
+                                masks[0].max(dim=0)[0].unsqueeze(0),
+                                global_step=global_step)
+            tb_logger.add_image("attention masks", segmsks[0, 0:1],
                                 global_step=global_step)
             # add ground truths to TB
             for jj, hm in enumerate(hms, 1):
@@ -288,15 +325,20 @@ for epoch in range(NUM_EPOCHS):
                                     hm[0].max(dim=0)[0].unsqueeze(0),
                                     global_step=global_step)
             # add predictions to TB
+            tb_logger.add_image("attention maps", att[0],
+                                global_step=global_step)
+
             tb_preds = []
-            for jj, pp in enumerate(preds, 1):
-                for p in pp[0]:
-                    tbp = p - p.min()
-                    tbp /= tbp.max()
-                    tb_preds.append(tbp.unsqueeze(0))
-                tb_logger.add_images("pred_stage_{}".format(jj), tb_preds,
-                                     global_step=global_step,
-                                     dataformats="CHW")
+            for jj, d in enumerate(det[0], 1):
+                d = d - d.min()
+                d /= d.max()
+                tb_preds.append(d.unsqueeze(0))
+            tb_logger.add_images("detection maps", tb_preds, dataformats="CHW",
+                                 global_step=global_step)
+
+            #     tb_logger.add_images("pred_stage_{}".format(jj), tb_preds,
+            #                          global_step=global_step,
+            #                          dataformats="CHW")
             # add weights and gradients histogram
             for name, param in student.named_parameters():
                 tb_logger.add_histogram(name + "_PARAMETERS",
