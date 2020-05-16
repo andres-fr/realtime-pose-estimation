@@ -19,7 +19,7 @@ from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
 from rtpe.dataloaders import CocoDistillationDatasetAugmented
 from rtpe.students import AttentionStudent
 from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
-    DistillationLossKeypointMining
+    DistillationBceLossKeypointMining
 from rtpe.engine import eval_student
 
 
@@ -64,8 +64,8 @@ SCALE_RANGE = [0.7, 1.3]
 
 # training
 TRAINABLE_STEM = False
-TRAIN_BATCH_SIZE = 10
-NUM_EPOCHS = 10000
+TRAIN_BATCH_SIZE = 15
+NUM_EPOCHS = 20000
 BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
 MINIVAL_GT_STDDEVS = [2.0]
@@ -156,10 +156,10 @@ txt_logger.info("HYPERPARAMETERS:\n{}".format(HPARS_DICT))
 
 
 # INSTANTIATE OPTIMIZER
-loss_fn = DistillationLossKeypointMining()
+det_loss_fn = DistillationBceLossKeypointMining(1, 1, DEVICE)
 att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1)*10).to(DEVICE)
 # If stem is not trainable it already has torch.no_grad so opt won't train it
-params = (# list(student.mid_stem.parameters()) +
+params = (list(student.mid_stem.parameters()) +
           list(student.att_lo.parameters()) +
           list(student.att_mid.parameters()) +
           list(student.att_hi.parameters()) +
@@ -292,9 +292,9 @@ for epoch in range(NUM_EPOCHS):
         att_opt.step()
         att_lr_scheduler.step()
         # train keypoints
-        detection_loss = loss_fn(det, teacher_hms, gt_hms,
-                                 alpha=DISTILLATION_ALPHA, mask=masks,
-                                 background_factor=0.1)
+        detection_loss = det_loss_fn(det, teacher_hms, gt_hms,
+                                     alpha=DISTILLATION_ALPHA, mask=masks,
+                                     background_factor=0.5)
         detection_loss.backward()
         det_opt.step()
         det_lr_scheduler.step()

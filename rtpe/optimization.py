@@ -133,6 +133,26 @@ class MaskedMseLoss(torch.nn.Module):
         return self.loss_fn(pred, gt)
 
 
+class MaskedBceWithLogits(torch.nn.Module):
+    """
+    """
+    def __init__(self, pos_weight=1, device="cpu"):
+        """
+        """
+        super().__init__()
+        self.pos_weight = torch.ones(1) * pos_weight
+        self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
+        self.to(device)
+
+    def forward(self, pred, gt, mask=None):
+        """
+        """
+        if mask is not None:
+            pred = pred * mask
+            gt = gt * mask
+        return self.loss_fn(pred, gt)
+
+
 class DistillationLoss(torch.nn.Module):
     """
     Given the student predictions, teacher predictions and ground truth,
@@ -194,4 +214,44 @@ class DistillationLossKeypointMining(DistillationLoss):
         # matplotlib.use('TkAgg')
         # plot_arrays(gt[0].max(dim=0)[0].cpu(), teacher_pred[0].max(dim=0)[0].cpu(), mask[0].max(dim=0)[0].cpu())
         # breakpoint()
+        return super().forward(student_pred, teacher_pred, gt, alpha, mask)
+
+
+class DistillationBceLossKeypointMining(DistillationLoss):
+    """
+    """
+    def __init__(self, teacher_pos_weight=1, gt_pos_weight=1, device="cpu"):
+        """
+        """
+        super().__init__()
+        self.teacher_loss_fn = MaskedBceWithLogits(teacher_pos_weight, device)
+        self.gt_loss_fn = MaskedBceWithLogits(gt_pos_weight, device)
+
+    def forward(self, student_pred, teacher_pred, gt, alpha=0.5, mask=None,
+                background_factor=0, pick_top=None):
+        """
+        only difference with super is that here targets MUST be between 0
+        and 1, so we normalize them if needed
+        """
+        assert 0 <= background_factor <= 1
+        # normalize GT/teacher maps if needed
+        with torch.no_grad():
+            if gt.min() < 0:
+                gt = gt - gt.min()
+            if gt.max() > 1:
+                gt = gt / gt.max()
+            if teacher_pred.min() < 0:
+                teacher_pred = teacher_pred - teacher_pred.min()
+            if teacher_pred.max() > 1:
+                teacher_pred = teacher_pred / teacher_pred.max()
+        #
+        if mask is not None:
+            with torch.no_grad():
+                bg_mask = gt.cpu() == 0
+                mask[bg_mask] *= background_factor
+        #
+        if pick_top is not None:
+            with torch.no_grad():
+                raise NotImplementedError
+        #
         return super().forward(student_pred, teacher_pred, gt, alpha, mask)

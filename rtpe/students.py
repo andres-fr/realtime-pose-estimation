@@ -629,7 +629,7 @@ class AttentionStudent(torch.nn.Module):
             torch.nn.ReLU(inplace=True))
         # load body:
         self.att_lo, self.att_mid, self.att_hi, self.att_top = self._attention_body()
-        self.det_lo, self.det_mid, self.det_hi, self.det_top = self._detection_body()
+        self.det_lo, self.det_mid, self.det_hi, self.det_top = self._detection_body_v1()
         # self.det = self._detection_body()
         # self.cams, self.hm_convs = self._make_body()
         # optionally initialize parameters
@@ -673,7 +673,7 @@ class AttentionStudent(torch.nn.Module):
         #
         return torch.nn.ModuleList([low_res, mid_res, high_res, top])
 
-    def _detection_body(self):
+    def _detection_body_v1(self):
         """
         """
         hm_out_ch = self.num_heatmaps + self.ae_dims
@@ -701,14 +701,6 @@ class AttentionStudent(torch.nn.Module):
         #
         return torch.nn.ModuleList([low_res, mid_res, high_res, top])
 
-        # cams = torch.nn.ModuleList()
-        # hms = torch.nn.ModuleList()
-        # for i in range(self.num_stages):
-        #     cams.append(ContextAwareModule(self.inplanes, hdc_dilations=[1, 2, 3, 4]))
-        #     hms.append(torch.nn.Conv2d(self.inplanes, hm_out_ch,
-        #                                kernel_size=3, padding=1, bias=True))
-        # return cams, hms
-
     def forward(self, x, out_hw=None, return_intermediate=False):
         """
         """
@@ -730,12 +722,20 @@ class AttentionStudent(torch.nn.Module):
                                              mode="nearest")
         att = hi + mid + lo
         att = self.att_top(att)
-        # att = torch.nn.functional.sigmoid(att)
+
         # att = torch.nn.functional.softmax(att) * att.shape[-1] * att.shape[-2]
-        att = torch.nn.functional.sigmoid(att / 20)
         # att = self.att_top(torch.cat((lo, hi), dim=1))
         # keypoint detector
-        stem_out = stem_out * att.expand(stem_out.shape)
+
+        ### THIS WAS THE ORIGINAL ATTENTION APPROACH
+        # att = torch.nn.functional.sigmoid(att / 20)
+        #  stem_out = stem_out * att.expand(stem_out.shape)
+
+        ### LOSS WITH THIS REDUCES FASTER, BUT KEYPOINTS STILL NOISY AF.
+        att = torch.nn.functional.sigmoid(att / 20)
+        stem_out = stem_out + att.expand(stem_out.shape)
+
+
         hi = self.det_hi(stem_out)
         mid = self.det_hi(stem_out)
         lo = self.det_lo(mid)
