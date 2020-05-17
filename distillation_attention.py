@@ -73,9 +73,9 @@ VAL_GT_STDDEVS = [2.0]
 TRAIN_GT_STDDEVS = [5.0]  # [20.0, 5.0]
 DISTILLATION_ALPHA = 0.5
 OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.001}
-SCHEDULER_HYPERPARS = {"max_lr": 0.01,
+SCHEDULER_HYPERPARS = {"max_lr": 0.03,
                        "min_lr": 0.001,
-                       "period": 500,
+                       "period": 1000,
                        "scale_max_lr": 1.0,
                        "scale_min_lr": 1.0,
                        "scale_period": 1.0}
@@ -115,6 +115,15 @@ student = AttentionStudent(MODEL_PATH,
                            PARAM_INIT_FN,
                            False,  # TRAINABLE_STEM,
                            BATCHNORM_MOMENTUM)
+
+# load pretrained attention part
+LOAD_TIMESTAMP = "17_May_2020_01:59:39.643"
+LOAD_EPOCH = 111
+LOAD_STEP = 15121
+inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
+    LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
+student.load_state_dicts(inpath)
+
 
 hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,
                           **HM_PARSER_PARAMS)
@@ -157,7 +166,7 @@ txt_logger.info("HYPERPARAMETERS:\n{}".format(HPARS_DICT))
 
 # INSTANTIATE OPTIMIZER
 det_loss_fn = DistillationBceLossKeypointMining(1, 1, DEVICE)
-att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1)*10).to(DEVICE)
+att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1)*7).to(DEVICE)
 # If stem is not trainable it already has torch.no_grad so opt won't train it
 params = (list(student.mid_stem.parameters()) +
           list(student.att_lo.parameters()) +
@@ -230,7 +239,8 @@ train_ds = CocoDistillationDatasetAugmented(
     overall_transform=AUGMENTATION_TRANSFORM,
     # whitelist_ids=EASY_IDS,
     # whitelist_ids=MINIVAL_IDS,
-    remove_images_without_annotations=True)
+    remove_images_without_annotations=False,  # True,
+    )
 
 
 # train_ds = CocoDistillationDatasetAugmented(

@@ -644,6 +644,7 @@ class AttentionStudent(torch.nn.Module):
                 hhrnet_statedict_path, device, check=False)
         #
         self.to(device)
+        self.device = device
 
     def _attention_body(self):
         """
@@ -700,6 +701,22 @@ class AttentionStudent(torch.nn.Module):
                             bias=True))
         #
         return torch.nn.ModuleList([low_res, mid_res, high_res, top])
+
+    def load_state_dicts(self, inpath):
+        """
+        :param inpath: something like ``os.path.join(SNAPSHOT_DIR,
+          "{}_epoch{}_step{}".format(LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))``
+        """
+        self.mid_stem.load_state_dict(torch.load(
+            inpath + "mid_stem.statedict", map_location=self.device))
+        self.att_lo.load_state_dict(torch.load(
+            inpath + "att_lo.statedict", map_location=self.device))
+        self.att_mid.load_state_dict(torch.load(
+            inpath + "att_mid.statedict", map_location=self.device))
+        self.att_hi.load_state_dict(torch.load(
+            inpath + "att_hi.statedict", map_location=self.device))
+        self.att_top.load_state_dict(torch.load(
+            inpath + "att_top.statedict", map_location=self.device))
 
     def forward(self, x, out_hw=None, return_intermediate=False):
         """
