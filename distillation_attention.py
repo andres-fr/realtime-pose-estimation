@@ -58,13 +58,13 @@ PARAM_INIT_FN = torch.nn.init.kaiming_normal_
 IMG_NORM_MEAN = [0.485, 0.456, 0.406]
 IMG_NORM_STDDEV = [0.229, 0.224, 0.225]
 HORIZONTAL_FLIP_P = 0.5
-ROTATION_MAX_DEGREES = 30
+ROTATION_MAX_DEGREES = 45
 TRANSLATION_MAX_RATIO = [0.1, 0.1]
 SCALE_RANGE = [0.7, 1.3]
 
 # training
 TRAINABLE_STEM = False
-TRAIN_BATCH_SIZE = 15
+TRAIN_BATCH_SIZE = 20
 NUM_EPOCHS = 20000
 BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
@@ -88,7 +88,7 @@ TB_LOGDIR = os.path.join("tb_log", "train", "[{}]_{}".format(__file__,
                                                              TIMESTAMP))
 
 # minival
-TB_DIAGNOSE_EVERY_BATCHES = 20
+TB_DIAGNOSE_EVERY_BATCHES = 100
 MINIVAL_EVERY_BATCHES = 150000
 SNAPSHOT_DIR = os.path.join("models", "snapshots")
 
@@ -193,10 +193,10 @@ IMG_NORMALIZE_TRANSFORM = torchvision.transforms.Compose([
 
 AUGMENTATION_TRANSFORM = SeededCompose([
     torchvision.transforms.ToPILImage(mode="F"),
-    # torchvision.transforms.RandomHorizontalFlip(p=HORIZONTAL_FLIP_P),
-    # torchvision.transforms.RandomAffine(
-    #     degrees=(-ROTATION_MAX_DEGREES, +ROTATION_MAX_DEGREES),
-    #     translate=TRANSLATION_MAX_RATIO, scale=SCALE_RANGE),
+    torchvision.transforms.RandomHorizontalFlip(p=HORIZONTAL_FLIP_P),
+    torchvision.transforms.RandomAffine(
+        degrees=(-ROTATION_MAX_DEGREES, +ROTATION_MAX_DEGREES),
+        translate=TRANSLATION_MAX_RATIO, scale=SCALE_RANGE),
     torchvision.transforms.RandomCrop(size=TRAIN_HW, pad_if_needed=True),
     torchvision.transforms.ToTensor()])
 
@@ -228,7 +228,8 @@ train_ds = CocoDistillationDatasetAugmented(
     gt_stddevs_pix=TRAIN_GT_STDDEVS,
     img_transform=IMG_NORMALIZE_TRANSFORM,
     overall_transform=AUGMENTATION_TRANSFORM,
-    whitelist_ids=EASY_IDS,
+    # whitelist_ids=EASY_IDS,
+    # whitelist_ids=MINIVAL_IDS,
     remove_images_without_annotations=True)
 
 
@@ -378,10 +379,15 @@ for epoch in range(NUM_EPOCHS):
         #             txt_logger.info("Saved snapshot to {}".format(outpath))
         # #
         global_step += 1
-    # # after every epoch...
-    # outpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}.statedict".format(
-    #     TIMESTAMP, epoch, global_step))
-    # student.save_body(outpath)
-    # txt_logger.info("Saved snapshot to {}".format(outpath))
+    # after every epoch...
+
+    outpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
+        TIMESTAMP, epoch, global_step))
+    torch.save(student.mid_stem.state_dict(), outpath + "mid_stem.statedict")
+    torch.save(student.att_lo.state_dict(), outpath + "att_lo.statedict")
+    torch.save(student.att_mid.state_dict(), outpath + "att_mid.statedict")
+    torch.save(student.att_hi.state_dict(), outpath + "att_hi.statedict")
+    torch.save(student.att_top.state_dict(), outpath + "att_top.statedict")
+    txt_logger.info("Saved snapshot to {}".format(outpath))
 
 txt_logger.info("PROGRAM FINISHED")
