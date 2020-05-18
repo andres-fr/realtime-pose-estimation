@@ -1,18 +1,37 @@
 # EXPLORATIONS
 
 
+## Changelog:
+
+### May 17
+
+* After few "raw" attempts, redesigned the student and dataloader to predict human segmentation masks. After a few tweaks, the `AttentionStudent` was able to capture both augmented train data and val with success.
+
+The results seem to show that the capacity is just OK for segm. masks (in terms of receptive field and resolution). attention may benefit from adding a few more maps to trim false positives, and also to avoid competing with the keypoint detector when modifying the mid stem.
+
+Detection seems to be in big need of capacity enhancement. Observing the results, it seems that the detector has several issues:
+
+1. It can't provide the spatial resolution needed
+2. All maps are similar: It can't distinguish them, particularly given the addition of the attention part.
+
+### May 18
+
+Increased capacity of keypoint pipeline using step nets. After training for a while, attention learned OK but KPs not. So Increased KP a little more, removed mid stem from attention optimizer, and passed KP detections through sigmoid(det/20) to try to emulate the success of the attention part.
+
+in 3 hours, the KP loss went from 0.8 to 0.72 while attention loss maintained. Maps look better, also in validation5000. So it seems that the attention part doesn't need to train the stem at this point.
+
+Since the attention has much more fpos than fneg, we go back to the multiplication schema. The network seems to be lacking a lot of spatial resolution and details, so we scale up the stem (after mult. by attention) and we concat the img before feeding the keypoint detector.
+
+
 ## Rationale
 
-The reasons are probably the target imbalances explained in the *SimplePose* paper, which heavily bias the model towards learning the background. Further reasons could be the student's lack of capacity or the inadequateness of the transfered stem. These are currently being explored:
-
-  * Init with kaiming uniform may help? What about multiplying the heatmaps by a constant to increase their importance?
+The reasons are probably the target imbalances explained in the *SimplePose* paper, which heavily bias the model towards learning the background. Further reasons could be the student's lack of capacity or the inadequateness of the transfered stem.
 
 
 ## Open Items
 
 * Input/breakpoint function with timeout that optionally jumps into debugger every x steps. This would allow for interventions during long training sessions.
 
-* second distillation stage: first train the student body to map from stem output to augmented teacher/GT. Then replace with a smaller, non-fp16 stem that learns to map from HSV/LAB to stem output.
 
 ```
 from skimage.color import rgb2lab

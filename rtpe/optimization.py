@@ -161,7 +161,7 @@ class DistillationLoss(torch.nn.Module):
       loss = alpha*MSE(teacher, gt) + (1 - alpha)*MSE(student, gt)
 
     Alpha represents the 'mix' between GT and teacher, and is expected to
-    be between 0 and 1.
+    be between 0 and 1. It is the teacher's relative weight (i.e. 1=teacher)
     """
 
     def __init__(self):

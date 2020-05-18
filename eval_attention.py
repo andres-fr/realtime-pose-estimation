@@ -18,7 +18,7 @@ from rtpe.third_party.group import HeatmapParser
 from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
     ModuleSummary, plot_arrays
 from rtpe.dataloaders import CocoDistillationDatasetAugmented
-from rtpe.students import AttentionStudent
+from rtpe.students import AttentionStudent, AttentionStudentSteps
 # from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
 #     DistillationBceLossKeypointMining
 from rtpe.engine import eval_student
@@ -29,7 +29,7 @@ from rtpe.engine import eval_student
 # #############################################################################
 # # GLOBALS
 # #############################################################################
-PLOT_EVERY = None
+PLOT_EVERY = 1
 
 
 EASY_VAL_BIG_PATH = "assets/coco_val_easy_big.txt"
@@ -89,17 +89,21 @@ torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.enabled = True
 
 
-student = AttentionStudent(MODEL_PATH,
-                           DEVICE,
-                           100, # inplanes,
-                           NUM_HEATMAPS, 0,  #  AE_DIMENSIONS,
-                           HALF_PRECISION,
-                           PARAM_INIT_FN,
-                           False,  # TRAINABLE_STEM
+STUD_CLASS, INPLANES = AttentionStudentSteps, 120
+LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
+student = STUD_CLASS(MODEL_PATH,
+                     DEVICE,
+                     INPLANES,
+                     NUM_HEATMAPS, 0,  # AE_DIMENSIONS,
+                     HALF_PRECISION,
+                     PARAM_INIT_FN,
+                     False,  # TRAINABLE_STEM
 )
 
-LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "17_May_2020_01:59:39.643", 111, 15121
 # LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "17_May_2020_19:48:38.493", 11, 3001
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "17_May_2020_01:59:39.643", 111, 15121
+
+
 inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
     LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
 student.load_state_dicts(inpath)
