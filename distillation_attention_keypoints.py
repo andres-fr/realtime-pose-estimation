@@ -9,6 +9,7 @@ I was passing a post-sigmoid to BCEWithLogits, and still worked. This is bad?
 
 import os
 import time
+import math
 #
 import torch
 import torch.backends.cudnn as cudnn
@@ -19,7 +20,7 @@ from rtpe.third_party.group import HeatmapParser
 #
 from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
     ModuleSummary
-from rtpe.dataloaders import CocoDistillationDatasetAugmented
+from rtpe.dataloaders import CocoDistillationDatasetAugmented2
 from rtpe.students import AttentionStudentSteps
 from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
     DistillationBceLossKeypointMining
@@ -67,21 +68,21 @@ SCALE_RANGE = [0.7, 1.3]
 
 # training
 TRAINABLE_STEM = False
-TRAIN_BATCH_SIZE = 12
+TRAIN_BATCH_SIZE = 16
 NUM_EPOCHS = 20000
 BATCHNORM_MOMENTUM = 0.1
 TRAIN_HW = [450, 450]
 MINIVAL_GT_STDDEVS = [2.0]
 VAL_GT_STDDEVS = [2.0]
-TRAIN_GT_STDDEVS = [5.0]  # [20.0, 5.0]
+TRAIN_GT_STDDEVS = [7.0]  # [20.0, 5.0]
 DISTILLATION_ALPHA = 0.8  # 0.5
-OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.001}
+OPT_INIT_PARAMS = {"momentum": 0.9, "weight_decay": 0.0003}
 SCHEDULER_HYPERPARS = {"max_lr": 0.025,
-                       "min_lr": 0.001,
+                       "min_lr": 0.003,
                        "period": 700,
-                       "scale_max_lr": 1.001,
+                       "scale_max_lr": 1.02,
                        "scale_min_lr": 1.0,
-                       "scale_period": 1.0}
+                       "scale_period": 1.01}
 
 # logging
 MINIVAL_FILE = "assets/coco_minival2017_100.txt"
@@ -91,10 +92,30 @@ TB_LOGDIR = os.path.join("tb_log", "train", "[{}]_{}".format(__file__,
                                                              TIMESTAMP))
 
 # minival
-TB_DIAGNOSE_EVERY_BATCHES = 1000
+TB_DIAGNOSE_EVERY_BATCHES = 500
 MINIVAL_EVERY_BATCHES = 150000
 SNAPSHOT_DIR = os.path.join("models", "snapshots")
 
+
+class DecayingDivisor:
+    """
+    At step=0 (when called first), it returns initial_val. When further
+    called, it returns a value that exponentially decays to 1.
+    """
+    def __init__(self, initial_val=20, step_decay=0.003):
+        """
+        """
+        self.initial_val = initial_val
+        self._x0 = initial_val - 1
+        self.step_decay = step_decay
+        self._step = 0
+
+    def __call__(self):
+        """
+        """
+        val = 1 + self.initial_val * math.exp(-self.step_decay * self._step)
+        self._step += 1
+        return val
 
 # #############################################################################
 # # MAIN ROUTINE
@@ -110,7 +131,9 @@ tb_logger = SummaryWriter(log_dir=TB_LOGDIR)
 # INSTANTIATE MODEL
 DUMMY_INPUT = torch.rand(1, 3, 456, 456).to(DEVICE)
 
-STUD_CLASS, INPLANES = AttentionStudentSteps, 120
+STUD_CLASS, INPLANES = AttentionStudentSteps, 80
+DECAYING_DIVISOR = DecayingDivisor(20, 0.001)
+
 student = STUD_CLASS(MODEL_PATH,
                      DEVICE,
                      INPLANES,
@@ -122,10 +145,13 @@ student = STUD_CLASS(MODEL_PATH,
 
 # load pretrained attention part
 
-LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
-inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
-    LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
-student.load_state_dicts(inpath)
+
+
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_00:02:57.265", 3, 1349
+# inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
+#     LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
+# student.load_state_dicts(inpath)
+
 
 hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,
                           **HM_PARSER_PARAMS)
@@ -167,7 +193,9 @@ txt_logger.info("HYPERPARAMETERS:\n{}".format(HPARS_DICT))
 
 
 # INSTANTIATE OPTIMIZER
-det_loss_fn = DistillationBceLossKeypointMining(7, 7, DEVICE)
+DET_POS_WEIGHT = 100  # 100 means that black happens 100 more times than white
+det_loss_fn = DistillationBceLossKeypointMining(DET_POS_WEIGHT, DET_POS_WEIGHT, DEVICE)
+# att_loss_fn = torch.nn.BCELoss(pos_weight=torch.ones(1)*7).to(DEVICE) THIS SHOULD BE THE LOSS TO USE BUT DOESNT HAVE POS_WEIGHT AND THE OTHER WORKS AMD THE GPU IS BLOATED, SO WE KEEP WITH LOGITS ATM ALTHOUGH WE PROVIDE SIGMOID.
 att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1)*7).to(DEVICE)
 # If stem is not trainable it already has torch.no_grad so opt won't train it
 params = (# list(student.mid_stem.parameters()) +
@@ -179,7 +207,8 @@ att_opt = get_sgd_optimizer(params, half_precision=HALF_PRECISION,
                             **OPT_INIT_PARAMS)
 att_lr_scheduler = SgdrScheduler(att_opt.optimizer, **SCHEDULER_HYPERPARS)
 params = (list(student.mid_stem.parameters()) +
-          list(student.steps.parameters()))
+          list(student.steps.parameters()) +
+          list(student.alt_img_stem.parameters()))
 det_opt = get_sgd_optimizer(params, half_precision=HALF_PRECISION,
                             **OPT_INIT_PARAMS)
 det_lr_scheduler = SgdrScheduler(det_opt.optimizer, **SCHEDULER_HYPERPARS)
@@ -209,7 +238,7 @@ AUGMENTATION_TRANSFORM = SeededCompose([
     torchvision.transforms.ToTensor()])
 
 minival_dl = torch.utils.data.DataLoader(
-    CocoDistillationDatasetAugmented(COCO_DIR, "val2017",
+    CocoDistillationDatasetAugmented2(COCO_DIR, "val2017",
                                      img_transform=IMG_NORMALIZE_TRANSFORM,
                                      remove_images_without_annotations=False,
                                      gt_stddevs_pix=MINIVAL_GT_STDDEVS,
@@ -220,7 +249,7 @@ minival_dl = torch.utils.data.DataLoader(
     pin_memory=True)
 
 val_dl = torch.utils.data.DataLoader(
-    CocoDistillationDatasetAugmented(COCO_DIR, "val2017",
+    CocoDistillationDatasetAugmented2(COCO_DIR, "val2017",
                                      img_transform=IMG_NORMALIZE_TRANSFORM,
                                      remove_images_without_annotations=False,
                                      gt_stddevs_pix=VAL_GT_STDDEVS),
@@ -230,7 +259,7 @@ val_dl = torch.utils.data.DataLoader(
     pin_memory=True)
 
 
-train_ds = CocoDistillationDatasetAugmented(
+train_ds = CocoDistillationDatasetAugmented2(
     COCO_DIR, "val2017",
     HRNET_VAL_DIR,
     gt_stddevs_pix=TRAIN_GT_STDDEVS,
@@ -241,17 +270,6 @@ train_ds = CocoDistillationDatasetAugmented(
     remove_images_without_annotations=True,
     )
 
-
-# train_ds = CocoDistillationDatasetAugmented(
-#     COCO_DIR, "train2017",
-#     HRNET_TRAIN_DIR,
-#     gt_stddevs_pix=TRAIN_GT_STDDEVS,
-#     img_transform=IMG_NORMALIZE_TRANSFORM,
-#     overall_transform=AUGMENTATION_TRANSFORM,
-#     remove_images_without_annotations=True)
-# # THIS IS TO TEST IF THE NN LEARNS AT ALL! REMOVE IT TO PROPERLY TRAIN
-# if DEBUG_REDUCE_TRAINSET:
-#     train_ds.ids = train_ds.ids[:50]
 
 
 train_dl = torch.utils.data.DataLoader(
@@ -266,16 +284,21 @@ train_dl = torch.utils.data.DataLoader(
 global_step = 1
 best_score = -1
 for epoch in range(NUM_EPOCHS):
-    for (img_id, imgs, masks, hms, teach_hms, teach_aes, segmsks) in train_dl:
+    for (img_id, imgs, masks, hms, teach_hms, teach_aes, segmsks,
+         imgs_alt) in train_dl:
+        #
         txt_logger.info("TRAINING epoch: {}, global step: {}".format(
             epoch, global_step))
+
         student.train()
         att_opt_lr = att_opt.optimizer.param_groups[0]["lr"]
         att_opt.zero_grad()
         det_opt_lr = det_opt.optimizer.param_groups[0]["lr"]
         det_opt.zero_grad()
         #
-        imgs = imgs.to(DEVICE)
+        with torch.no_grad():
+            imgs = imgs.to(DEVICE)
+            imgs_alt = imgs_alt.to(DEVICE)
         # gt = [torch.cat([gg, teach_aes[:, 0:1, :, :]], dim=1).to(DEVICE)
         #       for gg in hms]
         # masks = masks.unsqueeze(1).expand(*gt[0].shape).to(DEVICE)
@@ -284,10 +307,8 @@ for epoch in range(NUM_EPOCHS):
         # teach_preds = torch.cat([teach_hms, teach_aes[:, 0:1, :, :]],
         #                         dim=1).to(DEVICE)
 
-        att, det = student(imgs, out_hw=TRAIN_HW)
-
-        breakpoint()
-
+        att, det = student(imgs, out_hw=TRAIN_HW, alt=imgs_alt,
+                           att_divisor=DECAYING_DIVISOR())
         with torch.no_grad():
             segmsks = torch.nn.functional.interpolate(
                 segmsks.unsqueeze(1), att.shape[-2:], mode="bilinear").to(DEVICE)
@@ -306,7 +327,7 @@ for epoch in range(NUM_EPOCHS):
         # train keypoints
         detection_loss = det_loss_fn(det, teacher_hms, gt_hms,
                                      alpha=DISTILLATION_ALPHA, mask=masks,
-                                     background_factor=0.5)
+                                     background_factor=1)
         detection_loss.backward()
         det_opt.step()
         det_lr_scheduler.step()
@@ -342,8 +363,11 @@ for epoch in range(NUM_EPOCHS):
 
             tb_preds = []
             for jj, d in enumerate(det[0], 1):
-                d = d - d.min()
-                d /= d.max()
+                with torch.no_grad():
+                    # d = d.clamp(0, 1)
+                    d = d.sigmoid()
+                    # d = d - d.min()
+                    # d /= d.max()
                 tb_preds.append(d.unsqueeze(0))
             tb_logger.add_images("detection maps", tb_preds, dataformats="CHW",
                                  global_step=global_step)
@@ -400,6 +424,7 @@ for epoch in range(NUM_EPOCHS):
     torch.save(student.att_hi.state_dict(), outpath + "att_hi.statedict")
     torch.save(student.att_top.state_dict(), outpath + "att_top.statedict")
     torch.save(student.steps.state_dict(), outpath + "steps.statedict")
+    torch.save(student.alt_img_stem.state_dict(), outpath + "alt_img_stem.statedict")
     txt_logger.info("Saved snapshot to {}".format(outpath))
 
 txt_logger.info("PROGRAM FINISHED")

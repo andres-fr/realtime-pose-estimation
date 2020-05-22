@@ -90,7 +90,8 @@ torch.backends.cudnn.enabled = True
 
 
 STUD_CLASS, INPLANES = AttentionStudentSteps, 120
-LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
+LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "20_May_2020_02:23:10.079", 69, 18901
 student = STUD_CLASS(MODEL_PATH,
                      DEVICE,
                      INPLANES,

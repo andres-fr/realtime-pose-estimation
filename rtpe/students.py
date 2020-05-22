@@ -830,6 +830,21 @@ class AttentionStudentSteps(torch.nn.Module):
                             bias=False),
             torch.nn.BatchNorm2d(inplanes, momentum=bn_momentum),
             torch.nn.ReLU(inplace=True))
+
+        self._alt_planes = 50
+        self.alt_img_stem = torch.nn.Sequential(
+            torch.nn.Conv2d(3, self._alt_planes, kernel_size=5,
+                            stride=2, dilation=1, padding=2,
+                            bias=False),
+            torch.nn.BatchNorm2d(self._alt_planes, momentum=bn_momentum),
+            torch.nn.ReLU(inplace=True),
+            #
+            torch.nn.Conv2d(self._alt_planes, inplanes, kernel_size=5,
+                            stride=2, dilation=1, padding=2,
+                            bias=False),
+            torch.nn.BatchNorm2d(inplanes, momentum=bn_momentum),
+            torch.nn.ReLU(inplace=True))
+
         # load body:
         self.att_lo, self.att_mid, self.att_hi, self.att_top = self._attention_body()
         # self.det_lo, self.det_mid, self.det_hi, self.det_top = self._detection_body_v1()
@@ -853,26 +868,27 @@ class AttentionStudentSteps(torch.nn.Module):
     def _attention_body(self):
         """
         """
+        CAT_CHANNELS = 3
         # 1. send stem to an avg pool
         low_res = torch.nn.Sequential(
             torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1,
                                count_include_pad=False),
-            ContextAwareModule(self.inplanes, hdc_dilations=[1, 2, 3, 4, 5]),
-        )
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               hdc_dilations=[1, 2, 3, 4]))
         #
         mid_res = torch.nn.Sequential(
             torch.nn.AvgPool2d(kernel_size=3, stride=2, padding=1,
                                count_include_pad=False),
-            ContextAwareModule(self.inplanes, hdc_dilations=[1, 2, 3, 4, 5]),
-        )
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               hdc_dilations=[1, 2, 3, 4]))
         #
         high_res = torch.nn.Sequential(
-            ContextAwareModule(self.inplanes, hdc_dilations=[1, 2, 3, 4, 5]))
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               hdc_dilations=[1, 2, 3, 4]))
         #
         top = torch.nn.Sequential(
-            torch.nn.Conv2d(self.inplanes, 1, kernel_size=3,
-                            stride=1, dilation=1, padding=1,
-                            bias=True),
+            torch.nn.Conv2d(self.inplanes + CAT_CHANNELS, 1, kernel_size=3,
+                            stride=1, dilation=1, padding=1, bias=True),
             # torch.nn.Sigmoid()  # not needed because loss is BCE with logits
         )
         #
@@ -900,24 +916,32 @@ class AttentionStudentSteps(torch.nn.Module):
         #                     stride=1, dilation=1, padding=1,
         #                     bias=True))
         # #
-        CAT_CHANNELS = 3
-        steps = torch.nn.Sequential(
-            # ContextAwareModule(self.inplanes + CAT_CHANNELS,
-            #                    hdc_dilations=[1, 2, 3, 4]),
-            # ContextAwareModule(self.inplanes + CAT_CHANNELS,
-            #                    hdc_dilations=[1, 2, 3, 4]),
-            # ContextAwareModule(self.inplanes + CAT_CHANNELS,
-            #                    hdc_dilations=[1, 2, 3, 4]),
+        # TOTAL: inplanes+3 for the (attentioned) stem and inplanes for the alt img stem
+        CAT_CHANNELS = self.inplanes + 3
+
+        steps = torch.nn.Sequential(*[
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               # se_chans=self.inplanes + CAT_CHANNELS,
+                               # hdc_chans=(self.inplanes + CAT_CHANNELS) // 2,
+                               hdc_dilations=[1, 2, 3]),
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               # se_chans=self.inplanes + CAT_CHANNELS,
+                               # hdc_chans=(self.inplanes + CAT_CHANNELS) // 2,
+                               hdc_dilations=[1, 2, 3]),
+            ContextAwareModule(self.inplanes + CAT_CHANNELS,
+                               # se_chans=self.inplanes + CAT_CHANNELS,
+                               # hdc_chans=(self.inplanes + CAT_CHANNELS) // 2,
+                               hdc_dilations=[1, 2, 3]),
             # ResidualStepBlock(self.inplanes + CAT_CHANNELS, self.inplanes + CAT_CHANNELS, stride=1,
             #                   downsample=None),
             # ResidualStepBlock(self.inplanes + CAT_CHANNELS, self.inplanes + CAT_CHANNELS, stride=1,
             #                   downsample=None),
-            ResidualStepBlock(self.inplanes + CAT_CHANNELS,
-                              self.inplanes + CAT_CHANNELS, stride=1,
-                              downsample=None),
+            # ResidualStepBlock(self.inplanes + CAT_CHANNELS,
+            #                   self.inplanes + CAT_CHANNELS, stride=1,
+            #                   downsample=None),
             torch.nn.Conv2d(self.inplanes + CAT_CHANNELS, hm_out_ch,
                             kernel_size=3, stride=1, dilation=1, padding=1,
-                            bias=True))
+                            bias=True)])
         #
         #
         # return torch.nn.ModuleList([low_res, mid_res, high_res, top])
@@ -939,8 +963,12 @@ class AttentionStudentSteps(torch.nn.Module):
         self.att_top.load_state_dict(torch.load(
             inpath + "att_top.statedict", map_location=self.device))
 
-    def forward(self, x, out_hw=None, return_intermediate=False):
+    def forward(self, x, out_hw=None, alt=None, att_divisor=20):
         """
+        :param att_divisor: Attention will be divided by this no. before
+          being passed to sigmoid. This helps prevent collapsing to zero
+          at beginning of training. As a rule of thumb, try to keep logit
+          values between -1 and 1.
         """
         out_hms = []
         if self.trainable_stem:
@@ -950,7 +978,20 @@ class AttentionStudentSteps(torch.nn.Module):
             with torch.no_grad():
                 stem_out = self.stem(x)
                 stem_out = self.mid_stem(stem_out)
-        # human mask detector
+        # this is for the detector
+        alt_stem_out = self.alt_img_stem(alt)
+        #
+        # concat alt resized image to stem output
+        hhh, www = stem_out.shape[-2:]
+        if alt is None:
+            raise NotImplementedError("ATM alt is expected")
+        else:
+            with torch.no_grad():
+                alt = torch.nn.functional.interpolate(
+                    alt, (hhh, www), mode="bilinear")
+        stem_out = torch.cat((stem_out, alt), dim=1)
+
+        # attention part
         hi = self.att_hi(stem_out)
         mid = self.att_mid(stem_out)
         lo = self.att_lo(mid)
@@ -960,6 +1001,10 @@ class AttentionStudentSteps(torch.nn.Module):
                                              mode="nearest")
         att = hi + mid + lo
         att = self.att_top(att)
+        # NEW SCHEMA FOR THE /20
+        att = torch.nn.functional.sigmoid(att / att_divisor)
+
+
 
         # att = torch.nn.functional.softmax(att) * att.shape[-1] * att.shape[-2]
         # att = self.att_top(torch.cat((lo, hi), dim=1))
@@ -973,29 +1018,33 @@ class AttentionStudentSteps(torch.nn.Module):
         # stem_out = stem_out + att.expand(stem_out.shape)
 
         # ### 20 IS YOUR FRIEND, 10 IS NOT
-        # att = torch.nn.functional.sigmoid(att / 20)
+        ## att = torch.nn.functional.sigmoid(att / 20)
         # stem_out = torch.cat((stem_out, att), dim=1)
 
 
         # BACK TO ATTENTION, BUT THIS TIME CONCAT THE IMG
-        att = torch.nn.functional.sigmoid(att / 20)
+        # AND HAVE NEW SCHEMA FOR /20
+        # att = torch.nn.functional.sigmoid(att / 20)
+
         stem_out = stem_out * att.expand(stem_out.shape)
 
+        stem_out = torch.cat((stem_out, alt_stem_out), dim=1)
 
-        hhh, www = stem_out.shape[-2:]
-        stem_out = torch.nn.functional.interpolate(
-            stem_out, (hhh * 2, www * 2), mode="nearest")
-
-        with torch.no_grad():
-            x = torch.nn.functional.interpolate(
-                x, (hhh * 2, www * 2), mode="bilinear")
-        stem_out = torch.cat((stem_out, x), dim=1)
-
-
+        # PROGRESSIVE REFINEMENT APPROACH (MODULELIST)
+        # for cam in self.steps[:-1]:
+        #     stem_out = stem_out + cam(stem_out)
+        # det = self.steps[-1](stem_out)
         det = self.steps(stem_out)
-        det = torch.nn.functional.interpolate(det, att.shape[-2:],
-                                              mode="nearest")
-        det = det / 20
+        # det = torch.nn.functional.interpolate(det, att.shape[-2:],
+        #                                       mode="nearest")
+
+
+        #
+        # det = det / 20
+
+
+
+
         # det = torch.nn.functional.sigmoid(det / 20)
         # hi = self.det_hi(stem_out)
         # mid = self.det_hi(stem_out)

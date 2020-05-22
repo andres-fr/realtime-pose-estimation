@@ -22,6 +22,62 @@ in 3 hours, the KP loss went from 0.8 to 0.72 while attention loss maintained. M
 
 Since the attention has much more fpos than fneg, we go back to the multiplication schema. The network seems to be lacking a lot of spatial resolution and details, so we scale up the stem (after mult. by attention) and we concat the img before feeding the keypoint detector.
 
+Training interrupted after 7 epochs (2h) for non-related reasons. Very steep improvement in detection loss from 0.7 to 0.2, but still no visible keypoints in the output.
+
+### May 20
+
+Last run was promising, so resumed BUT replaced the concatenated img with the LAB color space version. Everything else identical.
+Result: Attention train loss maintained, but eval attention got visibly better. so training longer after convergence helped.
+Detection converged at 0.2. Problem: all detection maps seem equal! No traces of proper heatmaps.
+
+##### 20_May_2020_15:05:54.922:
+* Concat the img also before the attention "top" layer, to try to achieve more precise segmentations, crf-like. Also reduce capacity of attention part (eliminated the 5th stride), we need it more in detection.
+* Maybe S-E is hurting detection? Added an extra CAM, and duplicated channels for SE and HDC bottlenecks.
+* Reduced capacity of attention pipeline and inplanes to 100. Reduced batch size from 10 to 8.
+* Detection CAMs now perform progressive refinement (i.e. progressive residual connections).
+* Detection maps stay at 1/2 spatial res, aren't downscaled at 1/4 anymore.
+* Learning rate peaks increase by 3% now
+*Training from scratch: after 8h everything converged: attention loss got to 1.07 (last best was 1.06). Detection converged to 0.175 (last best was 0.2). Attention maps look OK, detection bad: all maps look the same!
+
+Overall happy : the mid stem and attention got notably reduced and still performed. detection still has to be fixed.
+
+
+
+##### ???
+* The att/20 line helps at the beginning, but now that we are using pretrained, removing it worked out well, and **could help to use the capacity of the model better**. At this point may be late though (dead cells), so did the following:
+  * Replaced att/20 by a function of the number of steps: att / (1 + 19*e^(-lambda*x)) which will smoothly go from 1/20 to 1/1. Training from scratch, found out that lambda=0.003 is stable, but lower may help regularize better (we go for 0.001). Maps also look crisper.
+
+* In hope that the new 1/20 policy helps the attention module use its capacity better, we reduce the planes from 100 to 80.
+* Also, we cat the alt image right after the stem, so the attention CAMs also read it directly.
+
+* In a similar fashion but in the detector, isolated the cause for all heatmaps being equal: WITH the `det = det/20` all looks equal, removing it, lots of saturation (but also differences). Removed the line with the hope that SGD deals with the saturation.
+
+Trying to fix detection without losing attention:
+  * Set `background_factor` from 0.5 to 1 and DET_POS_WEIGHT from 7 to 100. Increased train stddev from 5 to 7.
+  * TB detection logger now gets sigmoid instead of normalized maps, to match the optimizer.
+  * The attention is used to multiply the cat(stem, alt) maps. Parallel to that, an MLP processes the alt img and generates also ``inplanes`` channels. Both are concatenated and passed to the detection CAMs.
+
+
+
+IDEA NEXT: 
+
+The detector seems to lack a lot of context. It focuses on very local feats. Use intermediate supervision instead of prog residual? Make a parallel hi-res stem that gets residuals from the other?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Rationale
 

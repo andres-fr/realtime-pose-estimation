@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torchvision
 # from skimage.color import gray2rgb, rgb2lab, rgb2hsv
+from skimage.color import rgb2lab, rgb2hsv  # float(0, 1) or uint8(0, 255)
 #
 import pycocotools
 #
@@ -307,3 +308,68 @@ class CocoDistillationDatasetAugmented(CocoDistillationDataset):
             segm_mask = self.overall_transform(seed, segm_mask).squeeze()
         #
         return img_id, img, mask, hms, teach_hms, teach_ae, segm_mask
+
+
+
+class CocoDistillationDatasetAugmented2(CocoDistillationDataset):
+    """
+    Like the parent class, but getitem also returns the image in a different
+    format
+    """
+    def __init__(self,
+                 coco_root_path,
+                 coco_dataset_name,
+                 teacher_output_dir=None,
+                 remove_images_without_annotations=True,
+                 gt_stddevs_pix=[2.0],
+                 num_joints=17,
+                 img_transform=None,
+                 overall_transform=None,
+                 whitelist_ids=None,
+                 alt_colorspace="LAB"):
+        """
+        :param alt_colorspace: 'LAB' or 'HSV'.
+        """
+        super().__init__(coco_root_path, coco_dataset_name, teacher_output_dir,
+                         remove_images_without_annotations, gt_stddevs_pix,
+                         num_joints, whitelist_ids)
+        self.img_transform = img_transform
+        self.overall_transform = overall_transform
+        if alt_colorspace == "LAB":
+            self.colorspace_fn = rgb2lab
+        elif alt_colorspace == "HSV":
+            self.colorspace_fn = rgb2hsv
+        else:
+            raise NotImplementedError(
+                "Unknown color space {}".format(alt_colorspace))
+
+    def __getitem__(self, idx):
+        """
+        """
+        # all returned vals are FloatTensors
+        (img_id, img, mask, hms, teach_hms, teach_ae,
+         segm_mask) = super().__getitem__(idx)
+        #
+        img_alt = self.colorspace_fn(img.permute(1, 2, 0).numpy()).astype(
+            np.float32)
+        img_alt = torchvision.transforms.functional.to_tensor(img_alt)
+        #
+        if self.img_transform is not None:
+            img = self.img_transform(img)
+        #
+        if self.overall_transform is not None:
+            seed = np.random.randint(2147483647)
+            #
+            img = torch.cat([self.overall_transform(seed, ch) for ch in img])
+            img_alt = torch.cat([self.overall_transform(seed, ch) for ch in
+                                 img_alt])
+            mask = self.overall_transform(seed, mask).squeeze()
+            hms = [torch.cat([self.overall_transform(seed, ch) for ch in hm])
+                   for hm in hms]
+            teach_hms = torch.cat([self.overall_transform(seed, ch)
+                                   for ch in teach_hms])
+            teach_ae = torch.cat([self.overall_transform(seed, ch)
+                                  for ch in teach_ae])
+            segm_mask = self.overall_transform(seed, segm_mask).squeeze()
+        #
+        return img_id, img, mask, hms, teach_hms, teach_ae, segm_mask, img_alt
