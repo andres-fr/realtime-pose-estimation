@@ -2,9 +2,12 @@
 
 
 """
-TODO:
+This module is a sandbox to explore different distillation approaches. As in
+any standard DL setup, the main tasks it performs are:
 
-I was passing a post-sigmoid to BCEWithLogits, and still worked. This is bad?
+1. Gather globals (hyperparameters, paths etc)
+2. Instantiate required modules (NN, optimizers, loggers...)
+3. Perform training loop. Log results and save model snapshots periodically.
 """
 
 import os
