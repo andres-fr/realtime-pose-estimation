@@ -3,7 +3,8 @@
 
 """
 This module first runs a dataloader with data augmentation, optionally plotting
-the augmented data, and then performs a minival run, also optionally plotting.
+the augmented data, and then performs a minival run, saving the stem outputs to
+a given location as images.
 """
 
 
@@ -71,10 +72,9 @@ stem[1].load_pretrained(MODEL_PATH, device="cuda")
 stem.to("cuda")
 
 
-
 i = 1
 print("TRAIN >>>", i)
-img_id, img, mask, hms, teach_hms, teach_ae = val_augm_dataset[i]
+img_id, img, mask, hms, teach_hms, teach_ae, segm_mask = val_augm_dataset[i]
 with torch.no_grad():
     stem_out = stem(img.unsqueeze(0).to("cuda")).to("cpu").squeeze()
     matplotlib.use("TkAgg")
@@ -83,5 +83,6 @@ with torch.no_grad():
     for i_p, plane in enumerate(stem_out):
         outpath = os.path.join(OUTPUT_DIR, "id{}_plane{}.png".format(i, i_p))
         torchvision.utils.save_image(plane, outpath, normalize=True)
+
 
 breakpoint()

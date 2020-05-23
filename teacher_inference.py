@@ -8,8 +8,8 @@ images, and save them as compressed numpy arrays. Usage example::
 
   python teacher_inference.py  -I ~/datasets/coco/images/val2017/*
   -o /tmp -m models/pose_higher_hrnet_w48_640.pth.tar
-
 """
+
 
 import os
 import torch

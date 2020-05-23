@@ -2,6 +2,9 @@
 
 
 """
+This module is a small utility script that instantiates the model, preloads the
+pretrained attention parameters and runs the validation dataset, plotting the
+attention maps and computing the loss.
 """
 
 import os
@@ -17,7 +20,7 @@ from rtpe.third_party.group import HeatmapParser
 #
 from rtpe.helpers import SeededCompose, make_timestamp, ColorLogger, \
     ModuleSummary, plot_arrays
-from rtpe.dataloaders import CocoDistillationDatasetAugmented
+from rtpe.dataloaders import CocoDistillationDatasetAugmented2
 from rtpe.students import AttentionStudent, AttentionStudentSteps
 # from rtpe.optimization import get_sgd_optimizer, SgdrScheduler, \
 #     DistillationBceLossKeypointMining
@@ -89,9 +92,10 @@ torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.enabled = True
 
 
-STUD_CLASS, INPLANES = AttentionStudentSteps, 120
+STUD_CLASS, INPLANES = AttentionStudentSteps, 80
 # LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
-LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "20_May_2020_02:23:10.079", 69, 18901
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "20_May_2020_02:23:10.079", 69, 18901
+LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_03:46:23.329", 114, 19436
 student = STUD_CLASS(MODEL_PATH,
                      DEVICE,
                      INPLANES,
@@ -101,16 +105,12 @@ student = STUD_CLASS(MODEL_PATH,
                      False,  # TRAINABLE_STEM
 )
 
-# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "17_May_2020_19:48:38.493", 11, 3001
-# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "17_May_2020_01:59:39.643", 111, 15121
-
-
 inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
     LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
 student.load_state_dicts(inpath)
 
 # LOSS FN
-att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1) * 10).to(DEVICE)
+att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1) * 7).to(DEVICE)
 
 # INSTANTIATE DATALOADERS
 with open(MINIVAL_FILE, "r") as f:
@@ -126,11 +126,11 @@ IMG_NORMALIZE_TRANSFORM = torchvision.transforms.Compose([
                                      inplace=True)])
 
 val_dl = torch.utils.data.DataLoader(
-    CocoDistillationDatasetAugmented(COCO_DIR, "val2017",
-                                     img_transform=IMG_NORMALIZE_TRANSFORM,
-                                     remove_images_without_annotations=False,
-                                     # whitelist_ids=MINIVAL_IDS,
-                                     gt_stddevs_pix=MINIVAL_GT_STDDEVS),
+    CocoDistillationDatasetAugmented2(COCO_DIR, "val2017",
+                                      img_transform=IMG_NORMALIZE_TRANSFORM,
+                                      remove_images_without_annotations=False,
+                                      # whitelist_ids=MINIVAL_IDS,
+                                      gt_stddevs_pix=MINIVAL_GT_STDDEVS),
     batch_size=1,
     shuffle=False,
     num_workers=0,
@@ -142,11 +142,19 @@ txt_logger = ColorLogger(__file__, TXT_LOGPATH, filemode="w")  # w = write anew
 tb_logger = SummaryWriter(log_dir=TB_ATT_VALDIR)
 student.eval()
 with torch.no_grad():
-    for i, (img_id, imgs, masks, hms, _, _, segmsks) in enumerate(val_dl, 1):
+    for i, (img_id, imgs, masks, hms, _, _, segmsks,
+            imgs_alt) in enumerate(val_dl, 1):
         txt_logger.info("VALIDATION img: {}".format(i))
         #
         imgs = imgs.to(DEVICE)
-        att, _ = student(imgs)
+        imgs_alt = imgs_alt.to(DEVICE)
+        # Potentially you can run into this issue:
+        # https://discuss.pytorch.org/t/out-of-memory-error-during-evaluation-but-training-works-fine/12274/7
+        # Suggested fix didn't work here... what worked is to trigger pdb
+        # right before the out-of-memory line, and then continuing. Somehow
+        # the GPU memory gets collected that way. Calling torch.cuda.empty_cache
+        # didn't work either
+        att, _ = student(imgs, alt=imgs_alt)
         #
         segmsks = torch.nn.functional.interpolate(
             segmsks.unsqueeze(1), att.shape[-2:], mode="bilinear").to(DEVICE)
@@ -155,7 +163,6 @@ with torch.no_grad():
         txt_logger.info("att loss: {}".format(att_loss))
         tb_logger.add_scalar("validation att loss", att_loss, i)
         tb_logger.add_scalar("validation img id", img_id, i)
-        # breakpoint()
         # finally plot results
         if PLOT_EVERY is not None and i % PLOT_EVERY == 0:
             matplotlib.use("TkAgg")

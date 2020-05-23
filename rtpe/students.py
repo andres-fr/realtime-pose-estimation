@@ -963,12 +963,12 @@ class AttentionStudentSteps(torch.nn.Module):
         self.att_top.load_state_dict(torch.load(
             inpath + "att_top.statedict", map_location=self.device))
 
-    def forward(self, x, out_hw=None, alt=None, att_divisor=20):
+    def forward(self, x, out_hw=None, alt=None, att_divisor=None):
         """
-        :param att_divisor: Attention will be divided by this no. before
-          being passed to sigmoid. This helps prevent collapsing to zero
-          at beginning of training. As a rule of thumb, try to keep logit
-          values between -1 and 1.
+        :param att_divisor: If given, attention logits will be divided by this
+          number before being passed to sigmoid. This helps prevent collapsing
+          to zero at beginning of training. As a rule of thumb, try to keep
+          logit values between -1 and 1.
         """
         out_hms = []
         if self.trainable_stem:
@@ -1002,7 +1002,9 @@ class AttentionStudentSteps(torch.nn.Module):
         att = hi + mid + lo
         att = self.att_top(att)
         # NEW SCHEMA FOR THE /20
-        att = torch.nn.functional.sigmoid(att / att_divisor)
+        if att_divisor is not None:
+            att = att / att_divisor
+        att = torch.nn.functional.sigmoid(att)
 
 
 
