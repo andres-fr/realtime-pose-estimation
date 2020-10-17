@@ -68,6 +68,7 @@ IMG_TRANSFORM = torchvision.transforms.Compose([
 
 val_ds = CocoDistillationDatasetAugmented(
     COCO_DIR, "val2017", remove_images_without_annotations=False)
+
 img_paths = [os.path.join(COCO_DIR, "images", "val2017",
                           "{:012d}.jpg".format(x)) for x in val_ds.ids]
 

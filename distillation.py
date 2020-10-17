@@ -149,11 +149,15 @@ student = STUD_CLASS(MODEL_PATH,
 # load pretrained attention part
 
 
-
-# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_00:02:57.265", 3, 1349
-# inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
-#     LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
-# student.load_state_dicts(inpath)
+LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_03:46:23.329", 114, 19436
+inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
+    LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP))
+student.load_state_dicts(inpath)
+student.alt_img_stem.load_state_dict(torch.load(
+    inpath + "alt_img_stem.statedict", map_location=DEVICE))
+student.steps.load_state_dict(torch.load(
+    inpath + "steps.statedict", map_location=DEVICE))
+DECAYING_DIVISOR = DecayingDivisor(0, 0.001)
 
 
 hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,

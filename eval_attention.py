@@ -95,7 +95,9 @@ torch.backends.cudnn.enabled = True
 STUD_CLASS, INPLANES = AttentionStudentSteps, 80
 # LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "18_May_2020_14:45:20.437", 13, 3151
 # LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "20_May_2020_02:23:10.079", 69, 18901
-LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_03:46:23.329", 114, 19436
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "21_May_2020_03:46:23.329", 114, 19436
+# LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "23_May_2020_03:34:56.500", 77, 13183
+LOAD_TIMESTAMP, LOAD_EPOCH, LOAD_STEP = "23_May_2020_03:34:56.500", 87, 14873
 student = STUD_CLASS(MODEL_PATH,
                      DEVICE,
                      INPLANES,
@@ -110,7 +112,8 @@ inpath = os.path.join(SNAPSHOT_DIR, "{}_epoch{}_step{}".format(
 student.load_state_dicts(inpath)
 
 # LOSS FN
-att_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.ones(1) * 7).to(DEVICE)
+att_loss_fn = torch.nn.BCEWithLogitsLoss(
+    pos_weight=torch.ones(1) * 7).to(DEVICE)
 
 # INSTANTIATE DATALOADERS
 with open(MINIVAL_FILE, "r") as f:
