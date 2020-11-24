@@ -10,6 +10,11 @@ ffmpeg -i 0481BL.MXF 0481BL.MXF_%03d.png
 for i in /shared/mvn1e/sina/*; do python face_extractor.py -i $i; done
 for i in <ITER OVER FOLDERS WITH IMGS>; do python face_extractor.py -i $i; done
 
+
+.. WARNING:
+
+  This script seems to RAM somewhere (around 10GB after 6 hours).
+  Cheapest fix is to have enough RAM and run it in small enough batches.
 """
 
 import surgery
