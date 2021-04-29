@@ -8,10 +8,6 @@ images, and save them as compressed numpy arrays. Usage example::
 
   python teacher_inference.py  -I ~/datasets/coco/images/val2017/*
   -o /tmp -m models/pose_higher_hrnet_w48_640.pth.tar
-
-
-for i in '/shared/mvn1e/DANCE/Prj-0254_MoCap_SIDE_PROJECT_Beauty/Julia_Dance_Libraries/Library2018_Ballet&Contemporary/VideosLibrary2018_wFaces/yadif_jpg_halfres/'*; do j=`basename $i`; mkdir -p /tmp/julia/$j; python teacher_inference.py -o /tmp/julia/$j -m models/pose_higher_hrnet_w48_640.pth.tar -I $i/*; done
-
 """
 
 
@@ -25,11 +21,23 @@ import argparse
 #
 from rtpe.helpers import get_hrnet_w48_teacher
 from rtpe.third_party.transforms import resize_align_multi_scale
-
+from rtpe.third_party.group import HeatmapParser
+from rtpe.third_party.vis import save_valid_image
 
 # #############################################################################
 # # GLOBALS
 # #############################################################################
+
+# model config
+NUM_HEATMAPS = 17
+HM_PARSER_PARAMS = {"max_num_people": 30,
+                    "detection_threshold": 0.1,
+                    "tag_threshold": 1.0,
+                    "use_detection_val": True,
+                    "ignore_too_much": False,
+                    "tag_per_joint": True,
+                    "nms_ksize": 5,
+                    "nms_padding": 2}
 
 # backend config
 cudnn.benchmark = True
@@ -67,6 +75,8 @@ DEVICE = "cuda" if (not args.force_cpu and
                     torch.cuda.is_available()) else "cpu"
 
 model = get_hrnet_w48_teacher(MODEL_PATH).to(DEVICE)
+hm_parser = HeatmapParser(num_joints=NUM_HEATMAPS,
+                          **HM_PARSER_PARAMS)
 
 for img_path in IMG_PATHS:
     out_path = os.path.join(OUT_DIR,
@@ -81,24 +91,29 @@ for img_path in IMG_PATHS:
     resized_img, center, scale = resize_align_multi_scale(np.array(img),
                                                           INPUT_SIZE, 1, 1)
     t = preproc_img(resized_img).unsqueeze(0).to(DEVICE)
-
+    w, h = img.size
+    # run HHRNet inference
     with torch.no_grad():
         preds, refined = model(t)
-        preds = preds.squeeze().cpu().numpy()
-        refined = refined.squeeze().cpu().numpy()
-        print("saving predictions to", out_path)
-        np.savez_compressed(out_path,
-                            pred_heatmaps=preds[:17],
-                            embeddings=preds[17:],
-                            heatmaps_refined=refined,
-                            heatmaps_order=HEATMAPS_ORDER)
-
+        hms = torch.nn.functional.interpolate(
+            refined, (h, w), mode="bilinear", align_corners=True)
+        aes = torch.nn.functional.interpolate(
+            preds[:, NUM_HEATMAPS:, :, :], (h, w),
+            mode="bilinear", align_corners=True)
+    # parser accepts hms(1, 17, h, w) and ae (1, AE_DIM, h, w, 1)
+    grouped, scores = hm_parser.parse(hms, aes.unsqueeze(-1),
+                                      adjust=True, refine=True)
+    # Saving keypoints, scores and rendered image
+    np.savez_compressed(out_path, keypoints=grouped, scores=scores,
+                        heatmaps_order=HEATMAPS_ORDER)
+    save_valid_image(np.array(img), [x for x in grouped[0] if x.size > 0],
+                     out_path + "_rendered.jpg", dataset="COCO")
 
 # import matplotlib.pyplot as plt
 # # # plot img
 # # plt.clf(); plt.imshow(resized_img); plt.show()
 # # # plot all heatmaps
-# # plt.clf(); plt.imshow(heatmaps.squeeze().cpu().sum(0)); plt.show()
+# # plt.clf(); plt.imshow(hms.squeeze().cpu().sum(0)); plt.show()
 
 # # plot separate heatmaps on the img
 # p = torch.nn.functional.interpolate(heatmaps, size=t[0, 0].shape,

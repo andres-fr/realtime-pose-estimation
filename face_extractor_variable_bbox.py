@@ -59,7 +59,8 @@ def groups_to_heads(groups, p_thresh=0.3):
     """
     """
     people = [person for group in groups for person in group]
-    heads = [p[:4, :3] for p in people]
+    heads = [np.float32([(x, y) for x, y, p in person[:4, :3] if p>=p_thresh])
+             for person in people]
     return heads
 
     # heads = [np.float32([(x, y) for x, y, p in g[0][:4, :3] if p>=p_thresh])
@@ -209,22 +210,52 @@ for ii, imgpath in enumerate(img_paths):
         min_y, max_y = h[:, 1].min(), h[:, 1].max()
         head_bboxes.append((min_x, max_x, min_y, max_y))
 
+
+    # imgclean = Image.open(imgpath).convert("RGB")
+    # pltimg = np.float32(imgclean) / 255.0
+    # maxhm = hms[0].to("cpu").numpy().max(axis=0)
+    # # pltimg[:, :, 0] += maxhm
+    # # pltimg[:, :, 1] += maxhm
+    # # pltimg[:, :, 2] += maxhm
+    # pltimg /= pltimg.max()
+    # plot_arrays(pltimg, maxhm)
+
     # import pdb; pdb.set_trace()
 
+
+    # SANDBOX: FINDING THE BBOX RADIUS IS CRITICAL FOR THE PERFORMANCE.
+    # OPTIMAL RADIUS FOR MULTISCALE AND MISSING KEYPOINTS SHOULD BE IMPROVED
+        
     # for each bbox, obtain center and max radius, and redefine bboxes
     head_centers = [(0.5*(x0 + x1), 0.5*(y0 + y1)) for x0, x1, y0, y1 in head_bboxes]
     # HARDCODED RADIUS:
-    # head_maxrads = [0.5 * max(x1 - x0, y1 - y0) for x0, x1, y0, y1 in head_bboxes]
-    head_maxrads = [BBOX_RADIUS for x0, x1, y0, y1 in head_bboxes]
+    head_maxrads = [0.5 * max(x1 - x0, y1 - y0) for x0, x1, y0, y1 in head_bboxes]
+
+
+    head_maxrads = [max(30, x*3) for x in head_maxrads]
+    
+    # head_maxrads = [BBOX_RADIUS for x0, x1, y0, y1 in head_bboxes]
+
     expanded_bboxes = [(hc_x - rad, hc_y - rad, hc_x + rad, hc_y + rad) for (hc_x, hc_y), rad in zip(head_centers, head_maxrads)]
     print(">> head centers, expanded bboxes:", head_centers, expanded_bboxes)
+
+    # import pdb; pdb.set_trace()
+
+    ### END SANDBOX
+
+
+
+
+
+
+    
+
     # expanded_bboxes = [(x0, x1, y0, y1) for x0, y0, x1, y1 in expanded_bboxes]
     expanded_bboxes = [expand_bbox(x0, x1, y0, y1,
                                    expansion_ratio=1, clip_wh=img.size)
                        for x0, y0, x1, y1 in expanded_bboxes]
 
     # print(">>>>", len(grouped), grouped)
-    # import pdb; pdb.set_trace()
     # for evaluation
     final_results = [x for x in grouped[0] if x.size > 0]
     all_preds.append(final_results)
@@ -269,7 +300,11 @@ for ii, imgpath in enumerate(img_paths):
         face_mask_img.save(os.path.join(SAVE_DIR, imgname + "_mask.png"))
         #
         if SAVE_MIX:
-            arr_with_mask = (arr + 50*face_mask[:, :, None]).astype(np.float32)
+            arr_with_mask = (arr).astype(np.float32)
+            arr_with_mask[:, :, 0] += 60*face_mask
+            arr_with_mask[:, :, 1] += 60*face_mask
+            arr_with_mask[:, :, 2] += 100*face_mask
+            # arr_with_mask = (arr + 50*face_mask[:, :, None]).astype(np.float32)
             arr_with_mask *= 255.0 /arr_with_mask.max()
             arr_with_mask = arr_with_mask.astype(np.uint8)
             arr_with_mask_img = Image.fromarray(arr_with_mask)
